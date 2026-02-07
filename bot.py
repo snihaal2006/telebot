@@ -144,7 +144,8 @@ def read_attendance_file():
             # Create working file from original if it doesn't exist
             shutil.copy(config.EXCEL_ORIGINAL_PATH, config.EXCEL_WORKING_PATH)
         
-        df = pd.read_excel(config.EXCEL_WORKING_PATH)
+        # Read with explicit string type for Registration Column to prevent precision loss
+        df = pd.read_excel(config.EXCEL_WORKING_PATH, dtype={config.REGISTRATION_COLUMN: str})
         return df, None
     except FileNotFoundError:
         return None, "❌ Error: Original attendance file not found!"
@@ -168,8 +169,8 @@ def load_name_mapping():
             logger.error(f"Name list file not found at {config.NAME_LIST_PATH}")
             return {}
 
-        # Read Excel file without header, as per inspection
-        df = pd.read_excel(config.NAME_LIST_PATH, header=None)
+        # Read Excel file without header, as per inspection, force string to prevent float conversion
+        df = pd.read_excel(config.NAME_LIST_PATH, header=None, dtype=str)
         
         mapping = {}
         # Iterate through rows
