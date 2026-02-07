@@ -1,0 +1,7 @@
+Created test file: test_attendance.xlsx
+Target Student: 2403727755921001 (727724eucj001@skcet.ac.in) - Initial Status: PRESENT
+Marked as ABSENT.
+Verified: Student is ABSENT.
+Simulating Remove Absent for suffix: 01
+Set status to PRESENT
+SUCCESS: Student is back to PRESENT.

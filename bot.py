@@ -42,7 +42,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = [
         [
             InlineKeyboardButton("➕ Add Absent", callback_data='add_absent'),
-            InlineKeyboardButton("🆕 New Absent", callback_data='new_absent')
+            InlineKeyboardButton("🆕 New Absent", callback_data='new_absent'),
+            InlineKeyboardButton("➖ Remove Absent", callback_data='remove_absent')
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -63,7 +64,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/help - Show this help message\n\n"
         "*Session Modes:*\n"
         "• *Add Absent* - Continue editing existing working file\n"
-        "• *New Absent* - Start fresh from original (all PRESENT)\n\n"
+        "• *New Absent* - Start fresh from original (all PRESENT)\n"
+        "• *Remove Absent* - Mark students as PRESENT (fixes mistakes)\n\n"
         "*How to mark absent:*\n"
         "1. Choose session mode (Add/New)\n"
         "2. Send registration number endings:\n"
@@ -84,7 +86,8 @@ async def show_session_buttons(update: Update, message: str = None) -> None:
     keyboard = [
         [
             InlineKeyboardButton("➕ Add Absent", callback_data='add_absent'),
-            InlineKeyboardButton("🆕 New Absent", callback_data='new_absent')
+            InlineKeyboardButton("🆕 New Absent", callback_data='new_absent'),
+            InlineKeyboardButton("➖ Remove Absent", callback_data='remove_absent')
         ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -130,11 +133,28 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         shutil.copy(config.EXCEL_ORIGINAL_PATH, config.EXCEL_WORKING_PATH)
         
         await query.edit_message_text(
-            "🆕 *New Absent Mode*\n\n"
             "Created fresh working file from original (all PRESENT).\n"
             "Send registration number endings (e.g., '1' or '1,3,5,7')",
             parse_mode='Markdown'
         )
+        
+    elif query.data == 'remove_absent':
+        # Remove absent (mark as PRESENT)
+        context.user_data['session_mode'] = 'remove'
+        
+        if os.path.exists(config.EXCEL_WORKING_PATH):
+            await query.edit_message_text(
+                "➖ *Remove Absent Mode*\n\n"
+                "Continuing with existing working file.\n"
+                "Send registration number endings to mark as *PRESENT*.",
+                parse_mode='Markdown'
+            )
+        else:
+            await query.edit_message_text(
+                "⚠️ No working file found.\n"
+                "Please start with 'New Absent' or 'Add Absent' first.",
+                parse_mode='Markdown'
+            )
 
 
 def read_attendance_file():
@@ -310,12 +330,22 @@ async def handle_row_numbers(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reg_id = df.loc[df_index, config.REGISTRATION_COLUMN]
             current_status = df.loc[df_index, config.ATTENDANCE_COLUMN]
             
-            if current_status.upper() == 'ABSENT':
-                already_absent_rows.append((number, email, reg_id))
+            session_mode = context.user_data.get('session_mode', 'add')
+            
+            if session_mode == 'remove':
+                # Mark as PRESENT
+                if current_status.upper() == 'PRESENT':
+                    already_absent_rows.append((number, email, reg_id)) # reusing list for "already in desired state"
+                else:
+                    df.loc[df_index, config.ATTENDANCE_COLUMN] = 'PRESENT'
+                    updated_rows.append((number, email, reg_id))
             else:
-                # Update attendance to ABSENT
-                df.loc[df_index, config.ATTENDANCE_COLUMN] = 'ABSENT'
-                updated_rows.append((number, email, reg_id))
+                # Mark as ABSENT (default for 'add' or 'new')
+                if current_status.upper() == 'ABSENT':
+                    already_absent_rows.append((number, email, reg_id))
+                else:
+                    df.loc[df_index, config.ATTENDANCE_COLUMN] = 'ABSENT'
+                    updated_rows.append((number, email, reg_id))
     
     # Save the file if there were updates
     if updated_rows:
@@ -328,7 +358,9 @@ async def handle_row_numbers(update: Update, context: ContextTypes.DEFAULT_TYPE)
     confirmation_parts = []
     
     if updated_rows:
-        confirmation_parts.append(f"✅ *Marked {len(updated_rows)} student(s) as ABSENT:*\n")
+        session_mode = context.user_data.get('session_mode', 'add')
+        status_text = "PRESENT" if session_mode == 'remove' else "ABSENT"
+        confirmation_parts.append(f"✅ *Marked {len(updated_rows)} student(s) as {status_text}:*\n")
         for number, email, reg_id in updated_rows:
             # Format registration ID properly
             reg_id_str = f"{int(reg_id)}" if isinstance(reg_id, float) else str(reg_id)
@@ -336,7 +368,9 @@ async def handle_row_numbers(update: Update, context: ContextTypes.DEFAULT_TYPE)
             confirmation_parts.append(f"    Reg: {reg_id_str}")
     
     if already_absent_rows:
-        confirmation_parts.append(f"\nℹ️ *Already absent:*")
+        session_mode = context.user_data.get('session_mode', 'add')
+        already_status = "PRESENT" if session_mode == 'remove' else "ABSENT"
+        confirmation_parts.append(f"\nℹ️ *Already {already_status}:*")
         for number, email, reg_id in already_absent_rows:
             reg_id_str = f"{int(reg_id)}" if isinstance(reg_id, float) else str(reg_id)
             confirmation_parts.append(f"  • [{number}] {email}")
@@ -354,9 +388,9 @@ async def handle_row_numbers(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_document(
                 document=open(config.EXCEL_WORKING_PATH, 'rb'),
                 filename='Updated_Attendance.xlsx',
-                caption=f"✅ Updated attendance file ({len(updated_rows)} student(s) marked as ABSENT)"
+                caption=f"✅ Updated attendance file ({len(updated_rows)} student(s) marked as {status_text})"
             )
-            logger.info(f"Updated {len(updated_rows)} students: marked as ABSENT and file sent")
+            logger.info(f"Updated {len(updated_rows)} students: marked as {status_text} and file sent")
             
             # Show session buttons for next action
             # await show_session_buttons(update, "What would you like to do next?")
